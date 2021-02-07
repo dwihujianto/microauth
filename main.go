@@ -7,11 +7,14 @@ import (
 	"net/http"
 	"os"
 	"time"
+	"fmt"
 )
 
-var (
-	router = gin.Default()
-)
+type User struct {
+	ID uint64
+	Username string
+	Password string
+}
 
 var user = User{
 	ID: 1,
@@ -20,8 +23,11 @@ var user = User{
 }
 
 func main() {
-	router.POST("/login", Login)
-	log.Fatal(router.Run(":2000"))
+	r := gin.Default()
+	r.POST("/login", Login)
+	r.GET("/verify", VerifyToken)
+
+	log.Fatal(r.Run(":2000"))
 }
 
 func Login(c *gin.Context) {
@@ -47,9 +53,32 @@ func Login(c *gin.Context) {
 	c.JSON(http.StatusOK, token)
 }
 
-func CreateToken(userid uint64) (string, error) {
-	var err Error
+func VerifyToken(c *gin.Context) {
+	tokenString := c.Request.Header.Get("Authorization")
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if jwt.GetSigningMethod("HS256") != token.Method {
+			return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
+		}
 
+		return []byte("secret"), nil
+	})
+
+	if token != nil && err == nil {
+		result := gin.H{
+			"message": token,
+		}
+		c.JSON(http.StatusOK, result)
+	} else {
+		result := gin.H{
+			"message": "not authorized",
+			"error":   err.Error(),
+		}
+		c.JSON(http.StatusUnauthorized, result)
+		c.Abort()
+	}
+}
+
+func CreateToken(userid uint64) (string, error) {
 	os.Setenv("ACCESS_SECRET","banana")
 	atClaims := jwt.MapClaims{}
 	atClaims["authorized"] = true
@@ -58,7 +87,7 @@ func CreateToken(userid uint64) (string, error) {
 
 	at := jwt.NewWithClaims(jwt.SigningMethodHS256, atClaims)
 
-	token, err : at.SigningString([]bite(os.Getenv("ACCESS_SECRET")))
+	token, err := at.SignedString([]byte("secret"))
 
 	if err != nil {
 		return "", err
